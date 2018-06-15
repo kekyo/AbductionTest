@@ -46,8 +46,7 @@ let inline distinct (xs: Type list): Type list =
     Enumerable.Distinct(xs, typeComparer)
     |> Seq.toList
 
-// アブダクション推論のための辞書を作成する。
-// 辞書は、「代入する型」を与えると、「代入される型」のリストが得られる。
+// アブダクション推論のために、代入互換性のある型の探索と収集を行う関数
 let crawlAndCollectTypes (tryAdd: Type -> System.Collections.Generic.List<Type> option) (types: Type seq): unit =
 
     // 指定された型を再帰探索して:
@@ -136,6 +135,7 @@ let crawlAndCollectTypes (tryAdd: Type -> System.Collections.Generic.List<Type> 
 
 
 // アブダクション推論のための辞書引きを行う関数を生成する。
+// 関数は、「代入する型」を与えると、「直接代入互換性のある型」のリストが得られる。
 let createDictionaryAccessor(): Type -> Type list =
 
     // 調べた型を辞書に追加する関数
