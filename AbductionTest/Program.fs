@@ -1,11 +1,10 @@
 ﻿open System
-open System.Collections.Concurrent
 open System.Collections.Generic
 open System.Linq
 
 ///////////////////////////////////////////////////////////////////////////////////////
 // 以下（メインプログラム行まで）は、推論で使用する辞書を生成するのに必要なコードなので、
-// 推論動作には関係ありません
+// 推論動作に直接関係はありません
 
 // 与えられた型の種別を返すパターン関数
 let (|Object|Class|Interface|ValueType|NonApplicable|) (typ: Type) =
@@ -47,105 +46,89 @@ let inline distinct (xs: Type list): Type list =
     Enumerable.Distinct(xs, typeComparer)
     |> Seq.toList
 
-// 空のリスト
-let emptyList = new System.Collections.Generic.List<Type>()
-
 // アブダクション推論のための辞書を作成する。
 // 辞書は、「代入する型」を与えると、「代入される型」のリストが得られる。
-let crawlAndCollectTypes (tryAdd: Type -> System.Collections.Generic.List<Type> -> unit) (types: Type seq): unit =
+let crawlAndCollectTypes (tryAdd: Type -> System.Collections.Generic.List<Type> option) (types: Type seq): unit =
 
     // 指定された型を再帰探索して:
     // 1. 直接的に代入互換のある型を、tryAdd関数で登録する
     // 2. 代入互換性のある型のリストを取得する
     let rec recCrawl (typ: Type): Type list =
+
+        // 代入互換性のある型群を再帰探索して処理する
+        let recCrawlCompatibleTypes (compatibleTypes: Type list): Type list =
+            // プレースホルダとしてミュータブルなリストを登録する
+            match tryAdd typ with
+            // この型の処理が初回なら
+            | Some(placeholder) ->
+                // 基底型とインターフェイス型群を再帰探索し、探索した型に代入互換性のあった全ての型を取得
+                let compatibleBaseTypes =
+                    compatibleTypes
+                    |> List.collect recCrawl
+                    |> distinct
+
+                // この型の代入互換型から除外することで、直接的に代入互換のある型のみに絞って返す。
+                // 本来不要だが、逐次的に推論が行われることを確認するため: (A)
+                // int[]型について得られる情報:
+                //   System.Int32[]:    // 以下以外の型もあるが省略
+                //     System.Int32[] -> System.IList
+                //     System.Int32[] -> System.ICollection
+                //     System.Int32[] -> System.IEnumerable
+                //   System.IList:
+                //     System.IList -> System.ICollection
+                //     System.IList -> System.IEnumerable
+                //   System.ICollection:
+                //     System.ICollection -> System.IEnumerable
+                // 直接的に代入互換のある型に絞ったリストを辞書に加える:
+                //   System.Int32[]:
+                //     System.Int32[] -> System.IList
+                //   System.IList:
+                //     System.IList -> System.ICollection
+                //   System.ICollection:
+                //     System.ICollection -> System.IEnumerable
+                // 上記のように制限すれば、
+                //   1) System.Int32[] -> System.IList
+                //   2) System.IList -> System.ICollection
+                //   3) System.ICollection -> System.IEnumerable
+                // のような推論のための情報を準備できる。
+                let relatedTypes =
+                    compatibleTypes - compatibleBaseTypes
+
+                // 直接的に代入互換のある型をプレースホルダに追加する
+                relatedTypes |> List.iter(placeholder.Add)
+
+                // 代入互換性のある全ての型を返す（再帰で使用する）
+                compatibleTypes
+            
+            // この型は処理済み、又は処理中（の再帰探索中）
+            | None ->
+                // 代入互換性のある全ての型を返す（再帰で使用する）
+                compatibleTypes
+
         match typ with
-        // obj型は他の型への代入互換性はない
-        |Object ->
-            // 空のリストを登録する
-            let placeholder = new System.Collections.Generic.List<Type>()
-            tryAdd typ placeholder
+        // obj型は他の型への代入互換性はない（obj自身へのみ可能）
+        | Object ->
+            // obj型のみ登録する
+            tryAdd typ |> ignore
 
             // 代入互換性のある型はない
             []
 
         // クラス型・値型は、基底型とインターフェイス型を再帰探索する
-        |Class
-        |ValueType ->
-            // プレースホルダとしてミュータブルなリストを登録しておき、中身は後で更新する
-            let placeholder = new System.Collections.Generic.List<Type>()
-            tryAdd typ placeholder
-
-            // 基底型とインターフェイス型群を再帰探索し、探索した型に代入互換性のあった全ての型を取得
+        | Class
+        | ValueType ->
+            // この型に代入互換性のある、基底型とインターフェイス型群を取得して処理する
             let compatibleTypes = typ.BaseType :: (typ.GetInterfaces() |> List.ofArray)
-            let compatibleBaseTypes =
-                compatibleTypes
-                |> List.collect recCrawl
-                |> distinct
-
-            // この型の代入互換型から除外することで、直接的に代入互換のある型のみに絞って返す。
-            // 本来不要だが、逐次的に推論が行われることを確認するため: (A)
-            // int[]型について得られる情報:
-            //   System.Int32[]:    // 以下以外の型もあるが省略
-            //     System.Int32[] -> System.IList
-            //     System.Int32[] -> System.ICollection
-            //     System.Int32[] -> System.IEnumerable
-            //   System.IList:
-            //     System.IList -> System.ICollection
-            //     System.IList -> System.IEnumerable
-            //   System.ICollection:
-            //     System.ICollection -> System.IEnumerable
-            // 直接的に代入互換のある型に絞ったリストを辞書に加える:
-            //   System.Int32[]:
-            //     System.Int32[] -> System.IList
-            //   System.IList:
-            //     System.IList -> System.ICollection
-            //   System.ICollection:
-            //     System.ICollection -> System.IEnumerable
-            // 上記のように制限すれば、
-            //   1) System.Int32[] -> System.IList
-            //   2) System.IList -> System.ICollection
-            //   3) System.ICollection -> System.IEnumerable
-            // のような推論のための情報を準備できる。
-            let relatedTypes =
-                compatibleTypes - compatibleBaseTypes
-
-            // 直接的に代入互換のある型をプレースホルダに追加する
-            relatedTypes
-                // （今回は総称型は除外する）
-                |> List.filter(fun typ -> not typ.IsGenericType && not typ.IsGenericTypeDefinition)
-                |> List.iter(placeholder.Add)
-
-            // 代入互換性のある全ての型を返す（再帰で使用する）
-            compatibleTypes
+            recCrawlCompatibleTypes compatibleTypes
 
         // インターフェイス型は、インターフェイス型を再帰探索する
-        |Interface ->
-            // プレースホルダとしてミュータブルなリストを登録しておき、中身は後で更新する
-            let placeholder = new System.Collections.Generic.List<Type>()
-            tryAdd typ placeholder
-
-            // インターフェイス型群を再帰探索し、探索した型に代入互換性のあった全ての型を取得
+        | Interface ->
+            // この型に代入互換性のある、インターフェイス型群を取得して処理する
             let compatibleTypes = typ.GetInterfaces() |> List.ofArray
-            let compatibleBaseTypes =
-                compatibleTypes
-                |> List.collect recCrawl
-                |> distinct
-
-            // この型の代入互換型から除外することで、直接的に代入互換のある型のみに絞って返す。
-            let relatedTypes =
-                compatibleTypes - compatibleBaseTypes
-
-            // 直接的に代入互換のある型をプレースホルダに追加する
-            relatedTypes
-                // （今回は総称型は除外する）
-                |> List.filter(fun typ -> not typ.IsGenericType && not typ.IsGenericTypeDefinition)
-                |> List.iter(placeholder.Add)
-
-            // 代入互換性のある全ての型を返す（再帰で使用する）
-            compatibleTypes
+            recCrawlCompatibleTypes compatibleTypes
 
         // 上記以外の型は今回取り扱わない
-        |NonApplicable ->
+        | NonApplicable ->
             []
 
     // 型の集合全体を再帰探索する
@@ -155,18 +138,33 @@ let crawlAndCollectTypes (tryAdd: Type -> System.Collections.Generic.List<Type> 
 // アブダクション推論のための辞書引きを行う関数を生成する。
 let createDictionaryAccessor(): Type -> Type list =
 
-    // 調べた型を辞書に追加する関数の定義（調査済みの型の重複を除去する）
-    let results = new ConcurrentDictionary<Type, System.Collections.Generic.List<Type>>(typeComparer)
-    let tryAdd typ relatedTypes =
-        results.TryAdd(typ, relatedTypes) |> ignore
+    // 調べた型を辞書に追加する関数
+    // 初めてこの型が追加された場合、直接代入互換性のある型群を格納するためのリストを返す。
+    let results = new Dictionary<Type, System.Collections.Generic.List<Type>>(typeComparer)
+    let tryAdd (typ: Type): System.Collections.Generic.List<Type> option =
+        match results.TryGetValue(typ) with
+        | (true, _) -> None
+        | _ ->
+            let placeholder = new System.Collections.Generic.List<Type>()
+            results.Add(typ, placeholder)
+            Some(placeholder)
+            
+    // 空のリスト
+    let emptyList = new System.Collections.Generic.List<Type>()
 
-    // 任意の型を指定すると、代入互換性がある型のリストを返す関数を返す
-    // （Type -> Type list）
-    fun (typ: Type) ->
+    // 任意の型を指定すると、直接代入互換性がある型のリストを返す関数を定義する
+    let accessor (typ: Type): Type list =
         // 辞書への追加を試みる
         crawlAndCollectTypes tryAdd [typ]
         // 辞書から結果を取得する
         results.GetValueOrDefault(typ, emptyList) |> Seq.toList
+
+    // コアライブラリ全体を予め辞書に登録する
+    //typeof<System.Object>.Assembly.GetTypes()
+    //    |> Seq.iter(fun typ -> accessor typ |> ignore)
+
+    // アクセサ関数を返す
+    accessor
     
 ///////////////////////////////////////////////////////////////////////////////////////
 // メインプログラム
@@ -177,6 +175,10 @@ let typesEquals (a: Type list) (b: Type list): bool =
     let orderedA = Enumerable.OrderBy(a, (fun typ -> typ), typeComparer)
     let orderedB = Enumerable.OrderBy(b, (fun typ -> typ), typeComparer)
     orderedA.SequenceEqual(orderedB, typeComparer)
+
+// このコードは総称型に対応していないため、総称型をフィルタする関数を定義しておく
+let filterGenericTypes (types: Type list): Type list =
+    types |> List.filter(fun typ -> not typ.IsGenericType && not typ.IsGenericTypeDefinition)
 
 // ---------------------------------
 
@@ -204,9 +206,9 @@ let abduction (origins: Type list) (accessor: Type -> Type list): Type list =
     // 与えられた型同士は、お互いに代入互換性があることを積集合で計算できる:
     //   int[]:  Array, obj, IList, ICollection, IEnumerable, ICloneable, ...
     //   string: obj, IConvertible, IFormattable, IEnumerable, ICloneable, ...
-    // 上記の積集合で、obj, IEnumerable と ICloneable が抽出される
+    // 上記の積集合で、obj, IEnumerable と ICloneable が抽出される。
     origins
-        |> List.map recAbduction
+        |> List.map (recAbduction >> filterGenericTypes)    // （総称型はここで除外しておく）
         |> List.reduce (*)
 
 // ---------------------------------
@@ -225,11 +227,15 @@ let abductionOnceTest (accessor: Type -> Type list): unit =
     // 以下のコード片は、これを手動で実行する。
 
     // 1) int[] -> [ Array ]
-    let intArrayCompatibleTypes = accessor typeof<int[]>
+    let intArrayCompatibleTypes =
+        accessor typeof<int[]>
+        |> filterGenericTypes   // （不完全な総称型が含まれるため、結果をフィルタする）
     Debug.Assert(typesEquals intArrayCompatibleTypes [ typeof<Array> ])
 
     // 2) Array -> [ obj, IList, ... ]
-    let arrayCompatibleTypes = accessor typeof<Array>
+    let arrayCompatibleTypes =
+        accessor typeof<Array>
+        |> filterGenericTypes
     Debug.Assert(typesEquals arrayCompatibleTypes
         [ typeof<obj>;
         typeof<System.Collections.IList>;
@@ -238,12 +244,16 @@ let abductionOnceTest (accessor: Type -> Type list): unit =
         typeof<System.Collections.IStructuralEquatable>] )
 
     // 3) IList -> [ ICollection ]
-    let listCompatibleTypes = accessor typeof<System.Collections.IList>
+    let listCompatibleTypes =
+        accessor typeof<System.Collections.IList>
+        |> filterGenericTypes
     Debug.Assert(typesEquals listCompatibleTypes
         [ typeof<System.Collections.ICollection> ] )
 
     // 4) ICollection -> [ IEnumerable ]
-    let collectionCompatibleTypes = accessor typeof<System.Collections.ICollection>
+    let collectionCompatibleTypes =
+        accessor typeof<System.Collections.ICollection>
+        |> filterGenericTypes
     Debug.Assert(typesEquals collectionCompatibleTypes
         [ typeof<System.Collections.IEnumerable> ] )    // IEnumerableが推論された
 
