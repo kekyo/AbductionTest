@@ -177,8 +177,10 @@ let typesEquals (a: Type list) (b: Type list): bool =
     orderedA.SequenceEqual(orderedB, typeComparer)
 
 // このコードは総称型に対応していないため、総称型をフィルタする関数を定義しておく
+let isNonGenericTypes (typ: Type): bool =
+    not (typ.IsGenericType || typ.IsGenericTypeDefinition)
 let filterGenericTypes (types: Type list): Type list =
-    types |> List.filter(fun typ -> not typ.IsGenericType && not typ.IsGenericTypeDefinition)
+    types |> List.filter isNonGenericTypes
 
 // ---------------------------------
 
@@ -186,11 +188,15 @@ let filterGenericTypes (types: Type list): Type list =
 let abduction (origins: Type list) (accessor: Type -> Type list): Type list =
 
     // アブダクション辞書を再帰的に探索する関数
-    let rec recAbduction (currentType: Type): Type list =
+    let rec recAbduction (typ: Type): Type list =
 
         // 1. 型に対応する代入互換性のある型群を、アクセサ関数を使って取得する
         // （見つからない場合は空のリストが返される）
-        let compatibleTypes = accessor currentType
+        let compatibleTypes = accessor typ
+
+        // 推論経過をダンプします
+        if isNonGenericTypes typ then
+            printfn "%A: %A" typ (compatibleTypes |> filterGenericTypes)
 
         // 2. これらの型について再帰的に探索する
         // int[] -> [ Array ], Array -> [ IList ], ... のように探索することになる
