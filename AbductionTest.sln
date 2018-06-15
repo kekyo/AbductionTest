@@ -3,7 +3,13 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.27428.2043
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "AbductionTest", "AbductionTest\AbductionTest.fsproj", "{532FBC4A-F6B0-4053-BA30-EA50F909DBC7}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "AbductionTest", "AbductionTest\AbductionTest.fsproj", "{532FBC4A-F6B0-4053-BA30-EA50F909DBC7}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{0FD96066-48B1-487C-8247-C0B1803F346B}"
+	ProjectSection(SolutionItems) = preProject
+		.gitignore = .gitignore
+		README.md = README.md
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
