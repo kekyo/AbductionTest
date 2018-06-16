@@ -160,6 +160,8 @@ let createDictionaryAccessor(): Type -> Type list =
         results.GetValueOrDefault(typ, emptyList) |> Seq.toList
 
     // コアライブラリ全体を予め辞書に登録する
+    // 事前にすべての型を辞書に入れておけば、推論速度が向上する（キャッシング）。
+    // ただし、キャッシュを行わず、要求に応じてオンデマンドで探索しても結果は変わらない。
     //typeof<System.Object>.Assembly.GetTypes()
     //    |> Seq.iter(fun typ -> accessor typ |> ignore)
 
@@ -274,8 +276,6 @@ let recursiveAbductionTest (accessor: Type -> Type list): unit =
 
     // 以下のように int[] と string が与えられた場合、両方に互換性のある型は、
     // obj, IEnumerable と ICloneable になる。
-
-    let a = accessor typeof<string>
 
     let origins = [ typeof<int[]>; typeof<string> ]
 
